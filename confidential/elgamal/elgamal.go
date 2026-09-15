@@ -106,3 +106,43 @@ func Decrypt(ciphertextHex, privateKeyHex string, amountRange AmountRange) (uint
 	}
 	return result, nil
 }
+
+// Add homomorphically adds two ciphertexts encrypted under the same public key, returning
+// an encryption of the sum of their plaintexts. Both operands are 132 hex chars, as is
+// the result.
+//
+// It is the operation a ledger balance undergoes when it is credited: rippled adds the
+// transaction ciphertext straight into the stored balance, so a client predicting the
+// state a transaction leaves behind reproduces that credit with this.
+func Add(firstHex, secondHex string) (string, error) {
+	return combine(firstHex, secondHex, mptcrypto.AddCiphertexts)
+}
+
+// Subtract homomorphically subtracts the second ciphertext from the first, both encrypted
+// under the same public key, returning an encryption of the difference of their
+// plaintexts. It is the debit counterpart to Add.
+//
+// Subtracting a ciphertext from itself has no result: the difference is the curve's
+// identity element, which is not a ciphertext, and is reported as ErrCiphertextArithmetic.
+func Subtract(firstHex, secondHex string) (string, error) {
+	return combine(firstHex, secondHex, mptcrypto.SubtractCiphertexts)
+}
+
+// combine decodes both hex operands, applies one of the native group operations, and
+// re-encodes the result.
+func combine(firstHex, secondHex string, op func(a, b mptcrypto.Ciphertext) (mptcrypto.Ciphertext, error)) (string, error) {
+	first, err := hexutil.DecodeFixedHex(firstHex, mptsizes.CiphertextSize)
+	if err != nil {
+		return "", fmt.Errorf("%w: %w", ErrInvalidCiphertext, err)
+	}
+	second, err := hexutil.DecodeFixedHex(secondHex, mptsizes.CiphertextSize)
+	if err != nil {
+		return "", fmt.Errorf("%w: %w", ErrInvalidCiphertext, err)
+	}
+
+	result, err := op(mptcrypto.Ciphertext(first), mptcrypto.Ciphertext(second))
+	if err != nil {
+		return "", fmt.Errorf("%w: %w", ErrCiphertextArithmetic, err)
+	}
+	return hex.EncodeToString(result[:]), nil
+}
