@@ -104,6 +104,9 @@ var (
 	// ErrInvalidSponsorshipFee indicates that a sponsorship preflight fee is not
 	// a whole, non-negative number of drops.
 	ErrInvalidSponsorshipFee = errors.New("invalid sponsorship fee")
+	// ErrDelegatedReserveSponsorship indicates that a delegated transaction
+	// requested reserve sponsorship, which rippled rejects outright.
+	ErrDelegatedReserveSponsorship = errors.New("a delegated transaction cannot request reserve sponsorship")
 	// ErrSponsorshipEntryUnexpectedType indicates that a ledger_entry lookup
 	// returned a node that is not a Sponsorship entry.
 	ErrSponsorshipEntryUnexpectedType = errors.New("ledger entry is not a Sponsorship entry")

@@ -204,6 +204,37 @@ func TestValidateSponsorship(t *testing.T) {
 			expectValid: true,
 		},
 		{
+			name: "a zero fee draws nothing from an exhausted fee budget",
+			tx: func() map[string]any {
+				tx := sponsoredTx(types.SpfSponsorFee)
+				tx["Fee"] = "0"
+				return tx
+			}(),
+			entry:       sponsorshipEntry(0, xrpAmount(0), xrpAmount(0), nil),
+			expectValid: true,
+		},
+		{
+			name: "a zero fee draws nothing from an absent fee budget",
+			tx: func() map[string]any {
+				tx := sponsoredTx(types.SpfSponsorFee)
+				tx["Fee"] = "0"
+				return tx
+			}(),
+			entry:       sponsorshipEntry(0, nil, nil, nil),
+			expectValid: true,
+		},
+		{
+			name: "a nil SponsorSignature is not a co-signature",
+			tx: func() map[string]any {
+				tx := sponsoredTx(types.SpfSponsorFee)
+				tx["SponsorSignature"] = map[string]any(nil)
+				return tx
+			}(),
+			entry:        sponsorshipEntry(ledgerentry.LsfSponsorshipRequireSignForFee, xrpAmount(1000000), nil, nil),
+			expectValid:  false,
+			expectReason: ErrSponsorshipFeeSignatureRequired,
+		},
+		{
 			name:         "fee and reserve sponsorship reports the exhausted reserve budget first",
 			tx:           sponsoredTx(types.SpfSponsorFee | types.SpfSponsorReserve),
 			entry:        sponsorshipEntry(0, xrpAmount(1), nil, ownerCount(0)),
@@ -226,7 +257,7 @@ func TestValidateSponsorship(t *testing.T) {
 
 			expectedFee := tt.estimatedFee
 			if expectedFee == "" {
-				expectedFee = "100"
+				expectedFee, _ = tt.tx["Fee"].(string)
 			}
 			fee, feeErr := result.Fee.WholeString()
 			require.NoError(t, feeErr)
@@ -352,6 +383,36 @@ func TestValidateSponsorshipUsesDelegateAsSponsee(t *testing.T) {
 	require.True(t, result.Valid)
 	require.Equal(t, types.Address(sponsorAddress), gotSponsor)
 	require.Equal(t, types.Address(delegateAddress), gotSponsee)
+}
+
+// xrpld rejects reserve sponsorship on a delegated transaction outright, and
+// resolves its reserve budget against Account rather than the delegate, so no
+// entry lookup can make the combination valid.
+func TestValidateSponsorshipRejectsDelegatedReserveSponsorship(t *testing.T) {
+	tests := []struct {
+		name         string
+		sponsorFlags uint32
+	}{
+		{name: "reserve sponsorship", sponsorFlags: types.SpfSponsorReserve},
+		{name: "fee and reserve sponsorship", sponsorFlags: types.SpfSponsorFee | types.SpfSponsorReserve},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tx := sponsoredTx(tt.sponsorFlags)
+			tx["Delegate"] = delegateAddress
+
+			result, err := ValidateSponsorship(tx, "", func(_, _ types.Address) (*ledgerentry.Sponsorship, error) {
+				t.Fatal("delegated reserve sponsorship must not reach the ledger")
+				return nil, nil
+			})
+
+			require.NoError(t, err)
+			require.False(t, result.Valid)
+			require.ErrorIs(t, result.Reason, ErrDelegatedReserveSponsorship)
+			require.Nil(t, result.Sponsorship)
+		})
+	}
 }
 
 func TestValidateSponsorshipPropagatesQueryErrors(t *testing.T) {

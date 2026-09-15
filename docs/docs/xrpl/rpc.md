@@ -196,11 +196,11 @@ func (c *Client) Simulate(req *transactions.SimulateRequest) (*transactions.Simu
 
 The transaction must carry `Sponsor` and a nonzero `SponsorFlags`, and either a `Fee` or a nonempty `estimatedFee` in drops. The sponsee is the transaction's `Delegate` when present and its `Account` otherwise.
 
-Without a `Sponsorship` entry, only a sponsor co-signature (`SponsorSignature`) authorizes the sponsorship. With an entry, its budget always applies, even to a co-signed transaction: a sponsored fee must fit within `FeeAmount` and any `MaxFee` cap, and reserve sponsorship needs at least one `RemainingOwnerCount` unit. Pre-funded use is additionally rejected when the entry sets `lsfSponsorshipRequireSignForFee` or `lsfSponsorshipRequireSignForReserve` for the requested sponsorship type.
+Without a `Sponsorship` entry, only a sponsor co-signature (`SponsorSignature`) authorizes the sponsorship. With an entry, its budget always applies, even to a co-signed transaction, because rippled prefers the pre-funded fee payer whenever the entry exists: a sponsored fee must fit within `FeeAmount` and any `MaxFee` cap, and reserve sponsorship needs at least one `RemainingOwnerCount` unit. Pre-funded use is additionally rejected when the entry sets `lsfSponsorshipRequireSignForFee` or `lsfSponsorshipRequireSignForReserve` for the requested sponsorship type. A delegated transaction cannot request reserve sponsorship at all, and a zero fee draws nothing from the entry.
 
 A nil error means the preflight completed; read `SponsorshipValidation.Valid` and `SponsorshipValidation.Reason`, which wraps an `ErrSponsorship*` sentinel. A non-nil error means the preflight could not run, because the transaction inputs were unusable or the `ledger_entry` lookup failed. Only `entryNotFound` counts as an absent entry; transport, permission, and decoding failures are returned as errors.
 
-The check does not prove the sponsor holds enough XRP for its own account reserve, and it counts a single reserve unit, so it does not cover a transaction that creates more than one reserved object. rippled remains authoritative.
+The check does not prove the sponsor holds enough XRP for its own account reserve, and it counts a single reserve unit, so it does not cover a transaction that creates more than one reserved object, as a `Vault` or a pre-`MultiSignReserve` `SignerList` does. It also leaves the shape of the sponsored transaction to transaction validation, including the `SponsorFlags` mask, a `Sponsor` equal to `Account`, and which transaction types may request reserve sponsorship at all. rippled remains authoritative.
 
 ```go
 func (c *Client) ValidateSponsorship(tx transaction.FlatTransaction, estimatedFee string) (SponsorshipValidation, error)

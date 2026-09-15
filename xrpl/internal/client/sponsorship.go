@@ -88,16 +88,21 @@ func DecodeSponsorshipEntry(node ledgerentry.FlatLedgerObject) (*ledgerentry.Spo
 //
 // Without a Sponsorship entry, a sponsor co-signature (SponsorSignature) is the
 // only authorization, so an uncosigned transaction is rejected. With an entry,
-// the entry's budget always applies, even to a co-signed transaction: fee
-// sponsorship must fit within FeeAmount and any MaxFee cap, and reserve
-// sponsorship needs at least one RemainingOwnerCount unit. Pre-funded use is
-// additionally rejected when the entry sets the matching require-signature flag.
-// An entry carrying an explicit MaxFee of zero sponsors no fee at all.
+// the entry's budget always applies, even to a co-signed transaction, because
+// rippled prefers the pre-funded fee payer whenever the entry exists: a sponsored
+// fee must fit within FeeAmount and any MaxFee cap, and reserve sponsorship
+// needs at least one RemainingOwnerCount unit. Pre-funded use is additionally
+// rejected when the entry sets the matching require-signature flag. An entry
+// carrying an explicit MaxFee of zero sponsors no fee at all, and a zero fee
+// draws nothing from the entry, so it is never rejected for budget.
 //
 // The check is not a guarantee of success. It does not prove the sponsor holds
 // enough XRP for its own account reserve, and it counts a single reserve unit,
-// so it does not cover a transaction that creates more than one reserved object.
-// rippled remains authoritative.
+// so it does not cover a transaction that creates more than one reserved object,
+// as a Vault or a pre-MultiSignReserve SignerList does. It also leaves the shape
+// of the sponsored transaction to transaction validation, including the
+// SponsorFlags mask, a Sponsor equal to Account, and which transaction types may
+// request reserve sponsorship at all. rippled remains authoritative.
 //
 // A nil error means the preflight ran to completion; read the result for the
 // outcome. A non-nil error means it could not run: the transaction inputs were
@@ -117,9 +122,16 @@ func ValidateSponsorship(
 		return SponsorshipValidation{}, err
 	}
 
-	sponsee, err := sponsorshipSponsee(tx)
+	sponsee, delegated, err := sponsorshipSponsee(tx)
 	if err != nil {
 		return SponsorshipValidation{}, err
+	}
+
+	// rippled rejects reserve sponsorship on a delegated transaction outright, and
+	// its reserve check reads the entry between the sponsor and Account rather
+	// than the delegate, so no entry can make this combination valid.
+	if delegated && flag.Contains(sponsorFlags, types.SpfSponsorReserve) {
+		return SponsorshipValidation{Reason: ErrDelegatedReserveSponsorship, Fee: fee}, nil
 	}
 
 	entry, err := fetchSponsorship(sponsor, sponsee)
@@ -127,7 +139,7 @@ func ValidateSponsorship(
 		return SponsorshipValidation{}, err
 	}
 
-	coSigned := tx["SponsorSignature"] != nil
+	coSigned := hasSponsorSignature(tx)
 	if entry == nil {
 		// rippled requires a Sponsorship entry only for pre-funded sponsorship.
 		// A sponsor signature is authorization on its own.
@@ -173,7 +185,9 @@ func rejectSponsorship(
 		return fmt.Errorf("%w: RemainingOwnerCount %s", ErrSponsorshipReserveBudgetExhausted, ownerCountText(entry.RemainingOwnerCount))
 	}
 
-	if !sponsorsFee {
+	// rippled returns early before it resolves a fee payer when the transaction
+	// pays no fee, so a zero fee draws nothing from the entry.
+	if !sponsorsFee || fee.Cmp(currency.DropsFromUint64(0)) == 0 {
 		return nil
 	}
 
@@ -219,10 +233,11 @@ func sponsorshipFields(tx map[string]any) (types.Address, uint32, error) {
 	return types.Address(sponsor), sponsorFlags, nil
 }
 
-// sponsorshipSponsee resolves the account whose sponsorship is being used.
-// rippled looks up the Sponsorship entry against the transaction initiator,
-// which is Delegate for a delegated transaction and Account otherwise.
-func sponsorshipSponsee(tx map[string]any) (types.Address, error) {
+// sponsorshipSponsee resolves the account whose sponsorship is being used, and
+// reports whether a Delegate supplied it. rippled looks up the Sponsorship entry
+// against the transaction initiator, which is Delegate for a delegated
+// transaction and Account otherwise.
+func sponsorshipSponsee(tx map[string]any) (types.Address, bool, error) {
 	for _, field := range []string{"Delegate", "Account"} {
 		value, exists := tx[field]
 		if !exists || value == nil {
@@ -230,13 +245,26 @@ func sponsorshipSponsee(tx map[string]any) (types.Address, error) {
 		}
 		account, ok := typecheck.ToString(value)
 		if !ok {
-			return "", fmt.Errorf("%w: field %s is a %T", ErrAddressFieldIsNotAString, field, value)
+			return "", false, fmt.Errorf("%w: field %s is a %T", ErrAddressFieldIsNotAString, field, value)
 		}
 		if account != "" {
-			return types.Address(account), nil
+			return types.Address(account), field == "Delegate", nil
 		}
 	}
-	return "", ErrSponsorshipSponseeUnavailable
+	return "", false, ErrSponsorshipSponseeUnavailable
+}
+
+// hasSponsorSignature reports whether the transaction carries a sponsor
+// co-signature. A present but nil SponsorSignature is not authorization.
+func hasSponsorSignature(tx map[string]any) bool {
+	switch signature := tx["SponsorSignature"].(type) {
+	case nil:
+		return false
+	case map[string]any:
+		return signature != nil
+	default:
+		return true
+	}
 }
 
 // sponsorshipFee prefers an explicitly supplied estimate over the transaction's

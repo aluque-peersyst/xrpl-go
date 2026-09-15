@@ -68,6 +68,8 @@ var (
 	ErrSponsorshipFeeIsNotAString = clientinternal.ErrSponsorshipFeeIsNotAString
 	// ErrInvalidSponsorshipFee is returned when a sponsorship preflight fee is not a whole, non-negative number of drops.
 	ErrInvalidSponsorshipFee = clientinternal.ErrInvalidSponsorshipFee
+	// ErrDelegatedReserveSponsorship is returned when a delegated transaction requests reserve sponsorship.
+	ErrDelegatedReserveSponsorship = clientinternal.ErrDelegatedReserveSponsorship
 	// ErrSponsorshipEntryUnexpectedType is returned when a ledger_entry lookup returns a node that is not a Sponsorship entry.
 	ErrSponsorshipEntryUnexpectedType = clientinternal.ErrSponsorshipEntryUnexpectedType
 	// ErrSponsorshipEntryMalformed is returned when a Sponsorship ledger entry cannot be decoded.

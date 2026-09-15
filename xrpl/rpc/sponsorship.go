@@ -31,11 +31,13 @@ type SponsorshipValidation = clientinternal.SponsorshipValidation
 // a co-signed transaction: a sponsored fee must fit within FeeAmount and any
 // MaxFee cap, and reserve sponsorship needs at least one RemainingOwnerCount
 // unit. Pre-funded use is additionally rejected when the entry sets the matching
-// require-signature flag.
+// require-signature flag. A delegated transaction cannot request reserve
+// sponsorship at all, and a zero fee draws nothing from the entry.
 //
 // The check does not prove the sponsor holds enough XRP for its own account
 // reserve, and it counts a single reserve unit, so it does not cover a
-// transaction that creates more than one reserved object. rippled remains
+// transaction that creates more than one reserved object. It also leaves the
+// shape of the sponsored transaction to transaction validation. rippled remains
 // authoritative.
 //
 // A nil error means the preflight completed; read SponsorshipValidation.Valid
